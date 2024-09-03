@@ -1,14 +1,30 @@
-use std::path::PathBuf;
-use std::env;
+mod is_broken;
+use crate::is_broken::*;
 
+use std::path::PathBuf;
 use capnp::serialize;
-use capnp::schema_capnp::node;
-use capnp::schema_capnp::node::struct_;
-use capnp::schema_capnp::node::interface;
-use capnp::schema_capnp::node::const_;
-use capnp::schema_capnp::node::enum_;
-use capnp::schema_capnp::node::annotation;
 use capnpc::codegen::GeneratorContext;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+struct Args {
+    /// the path to the base capn'proto schema file
+    base_file_path: String,
+    /// the path to the changed capn'proto schema file
+    changed_file_path: String,
+    /// whether to output to file. The default value is None, and does not output as a file.
+    #[arg(short, long, default_value=None)]
+    output_file_path: Option<String>,
+    /// whether to import the standard path("/usr/local/include" and "/usr/include") or not
+    #[arg(short, long, default_value_t = false)]
+    no_standard_import: bool,
+    /// paths to the capn' proto schema files you want to import from the target schema
+    #[arg(short, long, default_values_t = Vec::<String>::new(), num_args(0..))]
+    import_paths: Vec<String>,
+    /// prefixes of the schema file
+    #[arg(short, long, default_values_t = Vec::<String>::new(), num_args(0..))]
+    src_prefixes: Vec<String>,
+}
 
 struct ReadWrapper<R>
 where
@@ -32,79 +48,41 @@ where
     }
 }
 
-fn main() {
-    let args_: Vec<String> = env::args().collect();
-    if args_.len() == 1 {
-        println!("Please pass target schema pathes as arguments");
-        return;
-    }
-    let args = &args_[1..];
-    let no_standard_import = false;
-    let import_paths: Vec<PathBuf> = vec![];
-    let src_prefixes: Vec<PathBuf> = vec![]; 
-    let files: Vec<PathBuf> = args.into_iter().map(|x| PathBuf::from(x)).collect();
-    let stdout = run_capnp(no_standard_import, import_paths, src_prefixes, files);
+fn main() -> Result<(), Box<dyn std::error::Error>>{
+    let args = Args::parse();
+    let base_file = PathBuf::from(args.base_file_path);
+    let stdout = run_capnp(
+        args.no_standard_import, 
+        args.import_paths.iter().map(PathBuf::from).collect(), 
+        args.src_prefixes.iter().map(PathBuf::from).collect(), 
+        base_file);
     let message = serialize::read_message(
         ReadWrapper { inner: stdout },
         capnp::message::ReaderOptions::new(),
-    ).unwrap();
-    let ctx: GeneratorContext = GeneratorContext::new(&message).unwrap();
-    for requested_file in ctx.request.get_requested_files().unwrap() {
-        load(&ctx, requested_file.get_id());
+    )?;
+    let base_ctx: GeneratorContext = GeneratorContext::new(&message)?;
+
+    let chnaged_file = PathBuf::from(args.changed_file_path);
+    let stdout = run_capnp(
+        args.no_standard_import, 
+        args.import_paths.iter().map(PathBuf::from).collect(), 
+        args.src_prefixes.iter().map(PathBuf::from).collect(), 
+        chnaged_file);
+    let message = serialize::read_message(
+        ReadWrapper { inner: stdout },
+        capnp::message::ReaderOptions::new(),
+    )?;
+    let changed_ctx: GeneratorContext = GeneratorContext::new(&message)?;
+
+    // loop based on the nodes in base schema 
+    for requested_file in base_ctx.request.get_requested_files()? {
+        let _ = is_broken(&base_ctx, &changed_ctx, requested_file.get_id());
     }
+
+    Ok(())
 }
 
-fn load(ctx: &GeneratorContext, node_id: u64) {
-    let node_ = ctx.node_map[&node_id];
-    match node_.which().unwrap() {
-        node::File(_) => {}
-        node::Struct(struct_) => {
-            handle_struct(ctx, struct_);
-        }
-        node::Interface(interface_) => {
-            handle_interface(ctx, interface_);
-        }
-        node::Const(const_) => {
-            handle_const(ctx, const_);
-        }
-        node::Enum(enum_) => {
-            handle_enum(ctx, enum_);
-        }
-        node::Annotation(annotation_) => {
-            handle_annotation(ctx, annotation_);
-        }
-    }
-    for nested_node in node_.get_nested_nodes().unwrap(){
-        load(ctx, nested_node.get_id())
-    }
-}
-
-fn handle_struct(ctx: &GeneratorContext, struct_: struct_::Reader) {
-    println!("struct detected");
-    // 
-}
-
-fn handle_interface(ctx: &GeneratorContext, interface_: interface::Reader) {
-    println!("interface detected");
-    // 
-}
-
-fn handle_const(ctx: &GeneratorContext, const_: const_::Reader) {
-    println!("const detected");
-    // 
-}
-
-fn handle_enum(ctx: &GeneratorContext, enum_: enum_::Reader) {
-    println!("enum detected");
-    // 
-}
-
-fn handle_annotation(ctx: &GeneratorContext, annotation_: annotation::Reader) {
-    println!("annotation detected");
-    // 
-}
-
-fn run_capnp(no_standard_import: bool, import_paths: Vec<PathBuf>, src_prefixes: Vec<PathBuf>, files: Vec<PathBuf>) -> std::process::ChildStdout {
+fn run_capnp(no_standard_import: bool, import_paths: Vec<PathBuf>, src_prefixes: Vec<PathBuf>, target_file: PathBuf) -> std::process::ChildStdout {
     let mut command = ::std::process::Command::new("capnp");
     command.env_remove("PWD");
     command.arg("compile").arg("-o").arg("-");
@@ -120,9 +98,7 @@ fn run_capnp(no_standard_import: bool, import_paths: Vec<PathBuf>, src_prefixes:
         command.arg(&format!("--src-prefix={}", src_prefix.display()));
     }
 
-    for file in files {
-        command.arg(file);
-    }
+    command.arg(target_file);
 
     command.stdout(::std::process::Stdio::piped());
     command.stderr(::std::process::Stdio::inherit());
