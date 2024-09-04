@@ -1,0 +1,6 @@
+[book]
+authors = ["AngryMane"]
+language = "en"
+multilingual = false
+src = "doc"
+title = "capnp-angy"

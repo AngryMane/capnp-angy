@@ -1,0 +1,1 @@
+capnp::schema_capnp::type_::Which<capnp::schema_capnp::type_::list::Reader<'_>, capnp::schema_capnp::type_::enum_::Reader<'_>, capnp::schema_capnp::type_::struct_::Reader<'_>, capnp::schema_capnp::type_::interface::Reader<'_>, capnp::schema_capnp::type_::any_pointer::Reader<'_>>

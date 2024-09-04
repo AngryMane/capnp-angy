@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Debug executable 'capnpc-angy'",
             "program": "${workspaceFolder}/target/debug/capnpc-angy",
-            "args": ["phone.capnp", "phone-after.capnp"],
+            "args": ["./test-cases/C07/C07-before.capnp", "./test-cases/C07/C07-after.capnp"],
             "cwd": "${workspaceFolder}"
         },
     ]
